@@ -1,11 +1,14 @@
 module Main exposing (Model)
 
 import Browser
+import Browser.Dom
 import DateFormat exposing (..)
-import Html exposing (..)
-import Html.Attributes exposing (..)
-import Html.Events exposing (..)
-import Json.Decode exposing (Decoder, at, field, int, map2, string)
+import Element exposing (..)
+import Element.Input exposing (..)
+import Html exposing (Html)
+import Html.Attributes exposing (id)
+import Html.Events exposing (on)
+import Json.Decode as Json
 import Task exposing (perform)
 import Time exposing (..)
 
@@ -15,11 +18,11 @@ import Time exposing (..)
 
 
 main =
-    Browser.element
+    Browser.document
         { init = init
         , update = update
         , subscriptions = subscriptions
-        , view = view
+        , view = \model -> Browser.Document "Elm Writer" [ view model ]
         }
 
 
@@ -29,8 +32,8 @@ main =
 
 type alias Model =
     { currentEntry : TextEntry
-    , rows : Int
-    , scratch : Int
+    , rows : Float
+    , pad : Float
     }
 
 
@@ -42,9 +45,14 @@ type alias TextEntry =
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( Model (TextEntry "" (millisToPosix 0)) 10 0
+    ( Model (TextEntry "" (millisToPosix 0)) 100 20
     , Task.perform GetDate Time.now
     )
+
+
+getScrollHeight : String -> Cmd Msg
+getScrollHeight str =
+    Task.attempt UpdateHeight (Browser.Dom.getViewportOf str)
 
 
 
@@ -52,20 +60,20 @@ init _ =
 
 
 type Msg
-    = UpdateBody String Int
+    = UpdateBody String
     | NoOp
+    | UpdateHeight (Result Browser.Dom.Error Browser.Dom.Viewport)
+    | GetNewHeight String String
     | GetDate Posix
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        UpdateBody str newRows ->
+        UpdateBody str ->
             -- We have to change the view if the textBody is too long
             ( { model
-                | rows = resizeRows newRows
-                , scratch = newRows
-                , currentEntry = updateEntryBody model.currentEntry str
+                | currentEntry = updateEntryBody model.currentEntry str
               }
             , Cmd.none
             )
@@ -75,8 +83,32 @@ update msg model =
             , Cmd.none
             )
 
+        UpdateHeight scrollheight ->
+            let
+                a =
+                    Debug.log "new scrollheight" scrollheight
+            in
+            ( { model | rows = parseViewportResult scrollheight }, Cmd.none )
+
+        GetNewHeight id _ ->
+            ( model, getScrollHeight id )
+
         NoOp ->
             ( model, Cmd.none )
+
+
+
+-- This should actually handle the error
+
+
+parseViewportResult : Result Browser.Dom.Error Browser.Dom.Viewport -> Float
+parseViewportResult result =
+    case result of
+        Err _ ->
+            10000
+
+        Ok info ->
+            info.scene.height
 
 
 updateEntryBody : TextEntry -> String -> TextEntry
@@ -106,30 +138,40 @@ resizeRows scrollHeight =
 
 view : Model -> Html Msg
 view model =
-    div []
-        [ p [] [ viewDate model.currentEntry.date ]
-        , textarea
-            [ class "main-text-input"
-            , cols 50
-            , rows model.rows
-            , value model.currentEntry.body
-            , on "input" inputDecoder
-            , autofocus True
+    Element.layout [] <|
+        viewEditor model
+
+
+viewEditor : Model -> Element Msg
+viewEditor model =
+    Element.column
+        [ centerX
+        , spacing 20
+        ]
+        [ Element.row [ centerX ]
+            [ viewDate model.currentEntry.date ]
+        , Element.Input.multiline
+            [ width fill
+            , htmlAttribute <| Html.Attributes.style "height" (String.fromFloat model.rows ++ "px")
+            , htmlAttribute <| id "bigfield"
             ]
-            []
+            { onChange = GetNewHeight "bigfield"
+            , text = model.currentEntry.body
+            , placeholder = Nothing
+            , label = Element.Input.labelHidden "Write here"
+            , spellcheck = False
+            }
         ]
 
 
-inputDecoder : Decoder Msg
-inputDecoder =
-    Json.Decode.map2 UpdateBody
-        (at [ "target", "value" ] string)
-        (at [ "target", "scrollHeight" ] int)
+
+-- Use Browser.Dom to getviewportof the node
+-- This requires using a task
+-- Then using the output of that taskviewDate : Posix -> Element Msg
 
 
-viewDate : Posix -> Html Msg
 viewDate secs =
-    Html.text (format displayDate utc secs)
+    Element.text (format displayDate utc secs)
 
 
 displayDate : List Token

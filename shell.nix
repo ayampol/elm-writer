@@ -7,5 +7,6 @@ mkShell {
   buildInputs = [   
     elmPackages.elm
     elmPackages.elm-format
+    ripgrep
   ];
 }
